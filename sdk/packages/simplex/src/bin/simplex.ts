@@ -90,6 +90,8 @@ interface FxStrategyConfig {
 	maxOrderUsd: string
 	/** Map of chain identifier (e.g. "EVM-97") to exotic token contract address */
 	exoticTokenAddresses: Record<string, HexString>
+	/** Optional per-chain confirmation policies for cross-chain orders */
+	confirmationPolicies?: Record<string, ChainConfirmationPolicy>
 }
 
 type StrategyConfig = BasicStrategyConfig | FxStrategyConfig
@@ -390,6 +392,12 @@ program
 					case "hyperfx": {
 						const bidPricePolicy = new FillerPricePolicy({ points: strategyConfig.bidPriceCurve })
 						const askPricePolicy = new FillerPricePolicy({ points: strategyConfig.askPriceCurve })
+					const fxConfirmationPolicy = strategyConfig.confirmationPolicies
+						? new ConfirmationPolicy(strategyConfig.confirmationPolicies)
+						: undefined
+					if (!fxConfirmationPolicy) {
+						logger.warn("No confirmationPolicies configured for hyperfx strategy; cross-chain orders will be skipped")
+					}
 						return new FXFiller(
 							privateKey,
 							configService,
@@ -399,6 +407,7 @@ program
 							askPricePolicy,
 							strategyConfig.maxOrderUsd,
 							strategyConfig.exoticTokenAddresses,
+							fxConfirmationPolicy,
 						)
 					}
 					default:
@@ -608,6 +617,23 @@ function validateConfig(config: FillerTomlConfig): void {
 
 			if (!strategy.exoticTokenAddresses || Object.keys(strategy.exoticTokenAddresses).length === 0) {
 				throw new Error("FX strategy must have at least one entry in 'exoticTokenAddresses'")
+			}
+
+			if (strategy.confirmationPolicies) {
+				for (const [chainId, policy] of Object.entries(strategy.confirmationPolicies)) {
+					if (!policy.points || !Array.isArray(policy.points) || policy.points.length < 2) {
+						throw new Error(
+							`FX confirmation policy for chain ${chainId} must have a 'points' array with at least 2 points`,
+						)
+					}
+					for (const point of policy.points) {
+						if (point.amount === undefined || point.value === undefined) {
+							throw new Error(
+								`Each point in FX confirmation policy for chain ${chainId} must have 'amount' and 'value'`,
+							)
+						}
+					}
+				}
 			}
 		}
 	}
