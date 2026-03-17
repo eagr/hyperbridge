@@ -1364,6 +1364,16 @@ export interface ExecuteIntentOrderOptions {
 	minBids?: number
 	bidTimeoutMs?: number
 	pollIntervalMs?: number
+	/**
+	 * If set, bids are restricted to the given solver until `timeoutMs` elapses,
+	 * after which any solver is accepted.
+	 */
+	solver?: {
+		/** Only bids from this address (matched against userOp.sender) will be considered */
+		address: HexString
+		/** After this many ms without a matching bid, execution falls back to any solver */
+		timeoutMs: number
+	}
 }
 
 /** Type for ERC-7821 Call struct */
