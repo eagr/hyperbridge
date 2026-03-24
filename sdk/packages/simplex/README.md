@@ -1,6 +1,6 @@
-# Hyperbridge Intent FillerV2
+# Hyperbridge Simplex
 
-A high-performance intent filler for the Hyperbridge IntentGatewayV2 protocol. This package provides both a library interface and a CLI binary for running an intent filler that monitors and fills cross-chain orders.
+Canonical documentation for Simplex lives in the Hyperbridge docs:
 
 ## Installation
 

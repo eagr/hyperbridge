@@ -26,7 +26,6 @@ export interface RebalancingConfig {
 }
 
 export interface FillerConfig {
-	privateKey: string
 	maxConcurrentOrders: number
 	logging?: LoggingConfig
 	hyperbridgeWsUrl?: string

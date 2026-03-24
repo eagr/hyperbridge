@@ -19,12 +19,13 @@ import { ChainClientManager } from "@/services/ChainClientManager"
 import { ContractInteractionService } from "@/services/ContractInteractionService"
 import { RebalancingService } from "@/services/RebalancingService"
 import { getLogger, configureLogger } from "@/services/Logger"
-import { privateKeyToAddress } from "viem/accounts"
 import { CacheService } from "@/services/CacheService"
 import { BidStorageService } from "@/services/BidStorageService"
+import { initializeSignerFromToml, type SignerConfig } from "@/services/wallet"
 import { MetricsService } from "@/services/MetricsService"
 import type { BinanceCexConfig } from "@/services/rebalancers/index"
 import { Decimal } from "decimal.js"
+import type { SigningAccount } from "@/services/wallet"
 
 // ASCII art header
 const ASCII_HEADER = `
@@ -241,7 +242,8 @@ interface BinanceConfig {
 
 interface FillerTomlConfig {
 	simplex: {
-		privateKey: string
+		// The signer is optional to keep the watch-only mode compatible
+		signer?: SignerConfig
 		maxConcurrentOrders: number
 		pendingQueue: PendingQueueConfig
 		logging?: LoggingConfig
@@ -308,7 +310,6 @@ program
 			}))
 
 			const fillerConfigForService: FillerServiceConfig = {
-				privateKey: config.simplex.privateKey,
 				maxConcurrentOrders: config.simplex.maxConcurrentOrders,
 				logging: config.simplex.logging,
 				substratePrivateKey: config.simplex.substratePrivateKey,
@@ -362,12 +363,13 @@ program
 
 			// Create shared services to avoid duplicate RPC calls and reuse connections
 			const sharedCacheService = new CacheService()
-			const privateKey = config.simplex.privateKey as HexString
-			const chainClientManager = new ChainClientManager(configService, privateKey)
+			const configuredSigner = initializeSignerFromToml(config.simplex.signer)
+			const chainClientManager = new ChainClientManager(configService, configuredSigner)
+			const runtimeSigner: SigningAccount = chainClientManager.getSigner()
 			const contractService = new ContractInteractionService(
 				chainClientManager,
-				privateKey,
 				configService,
+				runtimeSigner,
 				sharedCacheService,
 			)
 
@@ -387,7 +389,7 @@ program
 						const bpsPolicy = new FillerBpsPolicy({ points: strategyConfig.bpsCurve })
 						const confirmationPolicy = new ConfirmationPolicy(strategyConfig.confirmationPolicies)
 						return new BasicFiller(
-							privateKey,
+							runtimeSigner,
 							configService,
 							chainClientManager,
 							contractService,
@@ -398,14 +400,16 @@ program
 					case "hyperfx": {
 						const bidPricePolicy = new FillerPricePolicy({ points: strategyConfig.bidPriceCurve })
 						const askPricePolicy = new FillerPricePolicy({ points: strategyConfig.askPriceCurve })
-					const fxConfirmationPolicy = strategyConfig.confirmationPolicies
-						? new ConfirmationPolicy(strategyConfig.confirmationPolicies)
-						: undefined
-					if (!fxConfirmationPolicy) {
-						logger.warn("No confirmationPolicies configured for hyperfx strategy; cross-chain orders will be skipped")
-					}
+						const fxConfirmationPolicy = strategyConfig.confirmationPolicies
+							? new ConfirmationPolicy(strategyConfig.confirmationPolicies)
+							: undefined
+						if (!fxConfirmationPolicy) {
+							logger.warn(
+								"No confirmationPolicies configured for hyperfx strategy; cross-chain orders will be skipped",
+							)
+						}
 						return new FXFiller(
-							privateKey,
+							runtimeSigner,
 							configService,
 							chainClientManager,
 							contractService,
@@ -437,12 +441,7 @@ program
 					logger.info("Binance CEX rebalancing configured")
 				}
 
-				rebalancingService = new RebalancingService(
-					chainClientManager,
-					configService,
-					privateKey,
-					binanceConfig,
-				)
+				rebalancingService = new RebalancingService(chainClientManager, configService, binanceConfig)
 				logger.info("Rebalancing service initialized")
 			}
 
@@ -455,7 +454,7 @@ program
 				configService,
 				chainClientManager,
 				contractService,
-				privateKey,
+				runtimeSigner,
 				rebalancingService,
 				bidStorageService,
 			)
@@ -467,7 +466,7 @@ program
 			let metrics: MetricsService | undefined
 			if (options.port) {
 				const [metricsHost, metricsPortStr] = options.port.includes(":")
-					? options.port.split(":").slice(-2) as [string, string]
+					? (options.port.split(":").slice(-2) as [string, string])
 					: ["0.0.0.0", options.port]
 				const metricsPort = parseInt(metricsPortStr, 10)
 				if (isNaN(metricsPort) || metricsPort < 1 || metricsPort > 65535) {
@@ -485,7 +484,7 @@ program
 						bidStorage: bidStorageService,
 						chainClientManager,
 						configService,
-						fillerAddress: privateKeyToAddress(privateKey),
+						fillerAddress: runtimeSigner.account.address,
 						chains: config.chains.map((c) => c.chainId),
 						exoticTokenAddresses,
 						hyperbridgeWsUrl: config.simplex.hyperbridgeWsUrl,
@@ -552,8 +551,10 @@ function validateConfig(config: FillerTomlConfig): void {
 		})
 	const allChainsWatchOnly = isWatchOnlyGlobal || isWatchOnlyPerChain
 
-	if (!config.simplex?.privateKey && !allChainsWatchOnly) {
-		throw new Error("Filler private key is required (unless all chains are in watchOnly mode)")
+	const signer = config.simplex?.signer
+
+	if (!signer && !allChainsWatchOnly) {
+		throw new Error("Signer configuration is required via [simplex.signer]")
 	}
 
 	if ((!config.strategies || config.strategies.length === 0) && !allChainsWatchOnly) {
