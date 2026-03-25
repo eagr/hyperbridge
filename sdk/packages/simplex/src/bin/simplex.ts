@@ -248,10 +248,12 @@ interface FillerTomlConfig {
 		pendingQueue: PendingQueueConfig
 		logging?: LoggingConfig
 		watchOnly?: boolean | Record<string, boolean>
-		substratePrivateKey?: string
-		hyperbridgeWsUrl?: string
+		substratePrivateKey: string
+		hyperbridgeWsUrl: string
 		entryPointAddress?: string
 		solverAccountContractAddress?: string
+		/** Target gas units for EntryPoint deposits per chain. Defaults to 3,000,000. */
+		targetGasUnits?: number
 	}
 	strategies: StrategyConfig[]
 	chains: (UserProvidedChainConfig & { bundlerUrl?: string })[]
@@ -317,6 +319,7 @@ program
 				entryPointAddress: config.simplex.entryPointAddress,
 				dataDir: options.dataDir,
 				rebalancing: config.rebalancing,
+				targetGasUnits: config.simplex.targetGasUnits,
 			}
 
 			const configService = new FillerConfigService(fillerChainConfigs, fillerConfigForService)
@@ -489,6 +492,7 @@ program
 						exoticTokenAddresses,
 						hyperbridgeWsUrl: config.simplex.hyperbridgeWsUrl,
 						substratePrivateKey: config.simplex.substratePrivateKey,
+						dataDir: options.dataDir,
 					})
 					metrics.start(metricsPort, metricsHost)
 				}
@@ -555,6 +559,14 @@ function validateConfig(config: FillerTomlConfig): void {
 
 	if (!signer && !allChainsWatchOnly) {
 		throw new Error("Signer configuration is required via [simplex.signer]")
+	}
+
+	if (!config.simplex?.substratePrivateKey) {
+		throw new Error("simplex.substratePrivateKey is required")
+	}
+
+	if (!config.simplex?.hyperbridgeWsUrl) {
+		throw new Error("simplex.hyperbridgeWsUrl is required")
 	}
 
 	if ((!config.strategies || config.strategies.length === 0) && !allChainsWatchOnly) {

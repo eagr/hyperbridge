@@ -282,75 +282,97 @@ export class ContractInteractionService {
 	}
 
 	/**
-	 * Ensures the solver's EntryPoint deposit has enough native token to cover
-	 * the estimated gas cost for a given order.
+	 * Tops up the solver's EntryPoint deposit so it covers at least
+	 * `targetGasUnits` at the current gas price. Skips if the wallet
+	 * balance cannot afford at least 1M gas units (not enough to send txs).
 	 *
-	 * Uses cached gas estimates (from estimateGasFillPost) and, if the current
-	 * deposit is insufficient, tops up by depositing 10% of the solver's EOA
-	 * native balance on the destination chain.
+	 * @param chain - The chain identifier
+	 * @param targetGasUnits - Gas units the deposit should cover (default 3M)
+	 * @param thresholdGasUnits - Only top up if deposit is below this many gas units (defaults to targetGasUnits)
 	 */
-	async ensureEntryPointDeposit(order: Order): Promise<void> {
-		if (!order.id) {
-			this.logger.warn({ destination: order.destination }, "Order has no ID, skipping EntryPoint deposit check")
+	async topUpEntryPointDeposit(chain: string, targetGasUnits: bigint = 3_000_000n, thresholdGasUnits?: bigint): Promise<void> {
+		const effectiveThreshold = thresholdGasUnits ?? targetGasUnits
+		const entryPointAddress = this.configService.getEntryPointAddress(chain)
+		if (!entryPointAddress) {
 			return
 		}
 
-		const gasEstimate = this.cacheService.getGasEstimate(order.id)
-		if (!gasEstimate) {
-			this.logger.warn(
-				{ orderId: order.id, destination: order.destination },
-				"No cached gas estimate found, skipping EntryPoint deposit check",
-			)
+		const publicClient = this.clientManager.getPublicClient(chain)
+		const [currentDeposit, solverBalance, gasPrice] = await Promise.all([
+			this.getSolverEntryPointBalance(chain),
+			publicClient.getBalance({ address: this.solverAccountAddress }),
+			publicClient.getGasPrice(),
+		])
+
+		if (gasPrice === 0n) {
+			this.logger.warn({ chain }, "Gas price is zero, skipping EntryPoint top-up")
 			return
 		}
 
-		const requiredNative = 3n * gasEstimate.totalGasCostWei
+		// Skip if wallet can't afford at least 1M gas units
+		const walletGasUnits = solverBalance / gasPrice
+		const minWalletGasUnits = 1_000_000n
 
-		const currentDeposit = await this.getSolverEntryPointBalance(order.destination)
-
-		this.logger.debug(
-			{
-				orderId: order.id,
-				destination: order.destination,
-				currentDeposit: formatEther(currentDeposit),
-				requiredNative: formatEther(requiredNative),
-			},
-			"EntryPoint deposit gas coverage check",
-		)
-
-		if (currentDeposit >= requiredNative) {
-			return
-		}
-
-		const publicClient = this.clientManager.getPublicClient(order.destination)
-		const solverBalance = await publicClient.getBalance({ address: this.solverAccountAddress })
-		const depositAmount = solverBalance / 10n
-
-		if (depositAmount === 0n) {
+		if (walletGasUnits < minWalletGasUnits) {
 			this.logger.warn(
 				{
-					orderId: order.id,
-					destination: order.destination,
-					solverBalance: formatEther(solverBalance),
+					chain,
+					walletBalance: formatEther(solverBalance),
+					walletGasUnits: walletGasUnits.toString(),
+					gasPrice: gasPrice.toString(),
 				},
-				"Solver EOA balance too low to top up EntryPoint deposit",
+				"Wallet balance too low to afford minimum gas, skipping EntryPoint top-up",
 			)
+			return
+		}
+
+		const targetDeposit = targetGasUnits * gasPrice
+		const thresholdDeposit = effectiveThreshold * gasPrice
+		const depositGasUnits = currentDeposit / gasPrice
+
+		if (currentDeposit >= thresholdDeposit) {
+			this.logger.info(
+				{
+					chain,
+					currentDeposit: formatEther(currentDeposit),
+					depositGasUnits: depositGasUnits.toString(),
+					targetGasUnits: targetGasUnits.toString(),
+					walletBalance: formatEther(solverBalance),
+				},
+				"EntryPoint deposit covers target gas units, no top-up needed",
+			)
+			return
+		}
+
+		const deficit = targetDeposit - currentDeposit
+
+		if (solverBalance < deficit) {
+			this.logger.warn(
+				{
+					chain,
+					deficit: formatEther(deficit),
+					solverBalance: formatEther(solverBalance),
+					depositGasUnits: depositGasUnits.toString(),
+					targetGasUnits: targetGasUnits.toString(),
+				},
+				"Solver EOA balance insufficient to reach target deposit, depositing available balance",
+			)
+			await this.depositToEntryPoint(chain, solverBalance)
 			return
 		}
 
 		this.logger.info(
 			{
-				orderId: order.id,
-				destination: order.destination,
-				requiredNative: formatEther(requiredNative),
+				chain,
 				currentDeposit: formatEther(currentDeposit),
-				solverBalance: formatEther(solverBalance),
-				depositAmount: formatEther(depositAmount),
+				depositGasUnits: depositGasUnits.toString(),
+				targetGasUnits: targetGasUnits.toString(),
+				topUpAmount: formatEther(deficit),
 			},
-			"Top up EntryPoint deposit by 10% of solver EOA balance",
+			"Topping up EntryPoint deposit to cover target gas units",
 		)
 
-		await this.depositToEntryPoint(order.destination, depositAmount)
+		await this.depositToEntryPoint(chain, deficit)
 	}
 
 	/**
