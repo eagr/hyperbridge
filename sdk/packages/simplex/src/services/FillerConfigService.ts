@@ -155,6 +155,10 @@ export class FillerConfigService {
 		return this.chainConfigService.getUniswapRouterV2Address(chain)
 	}
 
+	getAerodromeRouterAddress(chain: string): HexString {
+		return this.chainConfigService.getAerodromeRouterAddress(chain)
+	}
+
 	getUniswapV2FactoryAddress(chain: string): HexString {
 		return this.chainConfigService.getUniswapV2FactoryAddress(chain)
 	}
@@ -169,6 +173,18 @@ export class FillerConfigService {
 
 	getUniswapV4QuoterAddress(chain: string): HexString {
 		return this.chainConfigService.getUniswapV4QuoterAddress(chain)
+	}
+
+	getUniswapV4PositionManagerAddress(chain: string): HexString {
+		return this.chainConfigService.getUniswapV4PositionManagerAddress(chain)
+	}
+
+	getUniswapV4PoolManagerAddress(chain: string): HexString {
+		return this.chainConfigService.getUniswapV4PoolManagerAddress(chain)
+	}
+
+	getUniswapV4StateViewAddress(chain: string): HexString {
+		return this.chainConfigService.getUniswapV4StateViewAddress(chain)
 	}
 
 	getPermit2Address(chain: string): HexString {
