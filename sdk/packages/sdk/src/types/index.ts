@@ -1318,7 +1318,6 @@ export const IntentOrderStatus = Object.freeze({
 	AWAITING_BIDS: "AWAITING_BIDS",
 	BIDS_RECEIVED: "BIDS_RECEIVED",
 	BID_SELECTED: "BID_SELECTED",
-	USEROP_SUBMITTED: "USEROP_SUBMITTED",
 	FILLED: "FILLED",
 	PARTIAL_FILL: "PARTIAL_FILL",
 	EXPIRED: "EXPIRED",
@@ -1340,12 +1339,6 @@ export type IntentOrderStatusUpdate =
 			selectedSolver: HexString
 			userOpHash: HexString
 			userOp: PackedUserOperation
-	  }
-	| {
-			status: "USEROP_SUBMITTED"
-			commitment: HexString
-			userOpHash: HexString
-			selectedSolver: HexString
 			transactionHash?: HexString
 	  }
 	| {
@@ -1399,7 +1392,6 @@ export interface ExecuteIntentOrderOptions {
 	order: Order
 	sessionPrivateKey?: HexString
 	minBids?: number
-	bidTimeoutMs?: number
 	pollIntervalMs?: number
 	/**
 	 * If set, bids are restricted to the given solver until `timeoutMs` elapses,
@@ -1409,6 +1401,17 @@ export interface ExecuteIntentOrderOptions {
 		/** Only bids from this address (matched against userOp.sender) will be considered */
 		address: HexString
 		/** After this many ms without a matching bid, execution falls back to any solver */
+		timeoutMs: number
+	}
+}
+
+/** Options for resuming execution of a previously placed intent order */
+export interface ResumeIntentOrderOptions {
+	sessionPrivateKey?: HexString
+	minBids?: number
+	pollIntervalMs?: number
+	solver?: {
+		address: HexString
 		timeoutMs: number
 	}
 }
